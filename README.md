@@ -1,4 +1,5 @@
 # Projeto Robótica - Webots Python
+Aluno: Luiggi Paschoalini Garcia, RA: 22.122.006-4
 
 Este projeto implementa um robô que deve encontrar a caixa leve e girar sobre o próprio eixo quando a encontrar.
 
