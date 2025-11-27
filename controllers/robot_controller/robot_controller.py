@@ -39,6 +39,8 @@ class RobotController:
         # Controle de estabilidade
         self.stable_counter = 0
         self.spin_delay_counter = 0
+        self.search_counter = 0
+        self.last_known_distance = float('inf')
         
         # Carrega as referências das caixas
         self.load_boxes()
@@ -195,18 +197,18 @@ class RobotController:
     
     def move_forward(self):
         """Move o robô para frente"""
-        self.left_motor.setVelocity(MAX_SPEED * 0.5)
-        self.right_motor.setVelocity(MAX_SPEED * 0.5)
+        self.left_motor.setVelocity(MAX_SPEED * 0.7)  # Mais rápido
+        self.right_motor.setVelocity(MAX_SPEED * 0.7)
     
     def turn_left(self):
         """Gira o robô para a esquerda"""
-        self.left_motor.setVelocity(-MAX_SPEED * 0.2)
-        self.right_motor.setVelocity(MAX_SPEED * 0.2)
+        self.left_motor.setVelocity(-MAX_SPEED * 0.4)  # Mais rápido
+        self.right_motor.setVelocity(MAX_SPEED * 0.4)
     
     def turn_right(self):
         """Gira o robô para a direita"""
-        self.left_motor.setVelocity(MAX_SPEED * 0.2)
-        self.right_motor.setVelocity(-MAX_SPEED * 0.2)
+        self.left_motor.setVelocity(MAX_SPEED * 0.4)  # Mais rápido
+        self.right_motor.setVelocity(-MAX_SPEED * 0.4)
     
     def spin_on_axis(self):
         """Gira o robô sobre o próprio eixo"""
@@ -220,65 +222,90 @@ class RobotController:
     
     def run(self):
         """Loop principal do robô"""
-        print("Iniciando busca pela caixa leve...")
+        print("🤖 Iniciando busca pela caixa leve...")
+        
+        if self.target_box:
+            print(f"🎯 Alvo: {self.target_box['name']} (massa: {self.target_box['node'].getField('mass').getSFFloat():.2f}kg)")
+        else:
+            print("⚠️ ATENÇÃO: Nenhuma caixa leve encontrada no mundo!")
         
         while self.robot.step(TIME_STEP) != -1:
             distance_to_target = self.get_distance_to_target()
             
             if self.state == 'SEARCHING':
+                # Verifica se tem uma caixa alvo definida
+                if not self.target_box:
+                    print("❌ Nenhuma caixa alvo encontrada! Procurando...")
+                    # Gira lentamente procurando
+                    self.turn_left()
+                    return
+                
                 if distance_to_target < 0.25:  # Chegou próximo à caixa (25cm)
                     self.state = 'APPROACHING'
-                    print(f"Caixa leve detectada próxima! Distância: {distance_to_target:.2f}m")
+                    print(f"🎯 Caixa leve detectada próxima! Distância: {distance_to_target:.2f}m")
                     print("Mudando para modo de aproximação...")
                     self.stable_counter = 0
+                    self.search_counter = 0
                 else:
+                    # Verifica se está progredindo em direção ao alvo
+                    self.search_counter += 1
+                    
+                    # Se não está progredindo há muito tempo, procura novamente
+                    if self.search_counter > 200 and distance_to_target > self.last_known_distance:
+                        print("🔄 Robô pode estar perdido. Reiniciando busca...")
+                        self.search_counter = 0
+                        # Gira para procurar novamente
+                        self.turn_left()
+                        return
+                    
+                    self.last_known_distance = min(self.last_known_distance, distance_to_target)
+                    
                     # Navega em direção à caixa usando lógica simples
                     direction = self.get_simple_direction_to_target()
                     
-                    if self.has_obstacle_ahead() and not self.is_target_box_detected():
-                        # Desvia do obstáculo
+                    # Verifica obstáculo apenas se não estiver indo direto para a caixa alvo
+                    if self.has_obstacle_ahead() and distance_to_target > 0.15:
+                        # Desvia apenas se não for a caixa alvo
                         self.turn_left()
-                        print("Obstáculo detectado, desviando...")
+                        print("🚧 Obstáculo detectado, desviando...")
                         self.stable_counter = 0
                     elif direction == 'left':
                         self.stable_counter = 0
                         self.turn_left()
-                        print("Virando à esquerda para o alvo")
+                        print(f"⬅️ Virando à esquerda para {self.target_box['name']} (dist: {distance_to_target:.2f}m)")
                     elif direction == 'right':
                         self.stable_counter = 0
                         self.turn_right()
-                        print("Virando à direita para o alvo")
+                        print(f"➡️ Virando à direita para {self.target_box['name']} (dist: {distance_to_target:.2f}m)")
                     else:  # direction == 'forward'
                         self.stable_counter += 1
                         
-                        if self.stable_counter > 3:  # Estável por alguns ciclos
+                        if self.stable_counter > 2:  # Estável por menos ciclos (mais rápido)
                             # Move em direção à caixa com velocidade ajustada pela distância
                             if distance_to_target > 0.3:
-                                self.move_forward()  # Velocidade normal
+                                self.move_forward()  # Velocidade alta
                             else:
-                                # Reduz velocidade quando próximo
-                                self.left_motor.setVelocity(MAX_SPEED * 0.25)
-                                self.right_motor.setVelocity(MAX_SPEED * 0.25)
-                            print(f"Movendo em direção à caixa... Distância: {distance_to_target:.2f}m")
+                                # Velocidade moderada quando próximo
+                                self.left_motor.setVelocity(MAX_SPEED * 0.4)
+                                self.right_motor.setVelocity(MAX_SPEED * 0.4)
+                            print(f"🎯 Indo para {self.target_box['name']}... Distância: {distance_to_target:.2f}m")
                         else:
                             # Ainda estabilizando
                             self.stop()
-                            print("Alinhando com o alvo...")
+                            print(f"⚖️ Alinhando com o alvo... (dist: {distance_to_target:.2f}m)")
             
             elif self.state == 'APPROACHING':
-                # Aproxima-se da caixa com cuidado
-                # Verifica se realmente tocou usando distância + sensores
-                very_close = distance_to_target < 0.06  # Muito próximo (6cm)
-                obstacle_detected = self.has_obstacle_ahead()  # Sensor detecta obstáculo
+                # Verifica se perdeu o alvo (muito longe novamente)
+                if distance_to_target > 0.5:
+                    print("❓ Perdeu o alvo durante aproximação. Voltando para busca...")
+                    self.state = 'SEARCHING'
+                    self.search_counter = 0
+                    return
                 
-                if very_close and obstacle_detected:
+                # IMPORTANTE: Só para se estiver REALMENTE próximo da CAIXA ALVO (não qualquer obstáculo)
+                if distance_to_target < 0.08:  # Muito próximo da caixa alvo específica
                     self.state = 'SPINNING'
-                    print("🎯 Encostou na caixa (confirmado por sensores)! Iniciando rotação...")
-                    self.stop()
-                    self.spin_delay_counter = 0
-                elif distance_to_target < 0.04:  # Emergência: muito muito próximo
-                    self.state = 'SPINNING' 
-                    print("🎯 Muito próximo da caixa! Iniciando rotação...")
+                    print(f"🎯 Chegou até a {self.target_box['name']}! Iniciando rotação...")
                     self.stop()
                     self.spin_delay_counter = 0
                 else:
@@ -286,24 +313,23 @@ class RobotController:
                     direction = self.get_simple_direction_to_target()
                     
                     if direction == 'forward':
-                        # Velocidade muito lenta para aproximação precisa
-                        if distance_to_target < 0.08:
-                            speed = MAX_SPEED * 0.1  # Muito devagar quando próximo
-                        elif distance_to_target < 0.15:
-                            speed = MAX_SPEED * 0.15  # Devagar
+                        # Velocidade ajustada para aproximação mais rápida
+                        if distance_to_target < 0.10:
+                            speed = MAX_SPEED * 0.3  # Moderado quando próximo
+                        elif distance_to_target < 0.20:
+                            speed = MAX_SPEED * 0.5  # Normal
                         else:
-                            speed = MAX_SPEED * 0.25  # Normal para aproximação
+                            speed = MAX_SPEED * 0.6  # Rápido para aproximação
                         
                         self.left_motor.setVelocity(speed)
                         self.right_motor.setVelocity(speed)
-                        print(f"Aproximando da caixa... Distância: {distance_to_target:.3f}m")
+                        print(f"🎯 Aproximando da caixa... Distância: {distance_to_target:.3f}m")
                     elif direction == 'left':
                         self.turn_left()
-                        print("Ajustando à esquerda")
+                        print("⬅️ Ajustando à esquerda")
                     else:  # right
                         self.turn_right()
-                        print("Ajustando à direita")
-            
+                        print("➡️ Ajustando à direita")
             
             elif self.state == 'SPINNING':
                 # Gira sobre o próprio eixo imediatamente
